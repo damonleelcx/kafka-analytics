@@ -1,6 +1,6 @@
 from kafka import KafkaProducer, KafkaAdminClient
 from kafka.admin import NewTopic
-from kafka.partitioner import Partitioner, murmur2
+from kafka.partitioner.default import DefaultPartitioner  # Updated import
 import json
 import random
 import time
@@ -24,9 +24,9 @@ class Message:
             "category": self.category
         }
 
-class CustomPartitioner(Partitioner):
-    def __init__(self, partitioner_config):
-        super().__init__(partitioner_config)
+class CustomPartitioner(DefaultPartitioner):  # Inherit from DefaultPartitioner
+    def __init__(self, partitions):
+        super().__init__(partitions)
         self.category_partition_map = {
             "sales": 0,
             "traffic": 1,
@@ -37,18 +37,17 @@ class CustomPartitioner(Partitioner):
 
     def __call__(self, key_bytes, all_partitions, available_partitions):
         if key_bytes is None:
-            return random.choice(available_partitions)
+            return super().__call__(key_bytes, all_partitions, available_partitions)
         
         category = key_bytes.decode('utf-8')
-        partition = self.category_partition_map.get(category, random.randint(0, len(available_partitions) - 1))
-        return partition % len(available_partitions)
+        return self.category_partition_map.get(category, super().__call__(key_bytes, all_partitions, available_partitions))
 
 def create_producer() -> KafkaProducer:
     return KafkaProducer(
         bootstrap_servers=['localhost:9092'],
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         key_serializer=lambda v: v.encode('utf-8'),
-        partitioner=CustomPartitioner
+        partitioner=CustomPartitioner  # Use the custom partitioner
     )
 
 def ensure_topic_exists(topic_name: str, num_partitions: int):

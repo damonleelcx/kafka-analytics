@@ -24,9 +24,8 @@ class Message:
             "category": self.category
         }
 
-class CustomPartitioner(DefaultPartitioner):  # Inherit from DefaultPartitioner
-    def __init__(self, partitions):
-        super().__init__(partitions)
+class CustomPartitioner:
+    def __init__(self, *args, **kwargs):  # Accept any arguments but ignore them
         self.category_partition_map = {
             "sales": 0,
             "traffic": 1,
@@ -34,20 +33,25 @@ class CustomPartitioner(DefaultPartitioner):  # Inherit from DefaultPartitioner
             "errors": 3,
             "latency": 4
         }
-
+    
     def __call__(self, key_bytes, all_partitions, available_partitions):
         if key_bytes is None:
-            return super().__call__(key_bytes, all_partitions, available_partitions)
+            if available_partitions:
+                return random.choice(available_partitions)
+            return random.choice(all_partitions)
         
         category = key_bytes.decode('utf-8')
-        return self.category_partition_map.get(category, super().__call__(key_bytes, all_partitions, available_partitions))
+        partition = self.category_partition_map.get(category)
+        if partition is not None and partition in available_partitions:
+            return partition
+        return random.choice(available_partitions)
 
 def create_producer() -> KafkaProducer:
     return KafkaProducer(
         bootstrap_servers=['localhost:9092'],
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         key_serializer=lambda v: v.encode('utf-8'),
-        partitioner=CustomPartitioner  # Use the custom partitioner
+        partitioner=CustomPartitioner
     )
 
 def ensure_topic_exists(topic_name: str, num_partitions: int):

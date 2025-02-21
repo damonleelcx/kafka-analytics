@@ -1,138 +1,75 @@
-from kafka import KafkaProducer, KafkaAdminClient
-from kafka.admin import NewTopic
-from kafka.partitioner.default import DefaultPartitioner  # Updated import
+from kafka import KafkaProducer
+from threading import Thread
 import json
-import random
 import time
-import signal
-import threading
+import random
 from datetime import datetime
-from typing import Dict, Any
 
-class Message:
-    def __init__(self, id: str, category: str, value: float):
-        self.id = id
-        self.timestamp = datetime.now().isoformat()
-        self.value = value
-        self.category = category
+class AnalyticsProducer(Thread):
+    def __init__(self, bootstrap_servers, topic_name, producer_id):
+        Thread.__init__(self)
+        self.producer = KafkaProducer(
+            bootstrap_servers=bootstrap_servers,
+            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+            key_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
+        self.topic_name = topic_name
+        self.producer_id = producer_id
+        self.running = True
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "timestamp": self.timestamp,
-            "value": self.value,
-            "category": self.category
-        }
-
-class CustomPartitioner:
-    def __init__(self, *args, **kwargs):  # Accept any arguments but ignore them
-        self.category_partition_map = {
-            "sales": 0,
-            "traffic": 1,
-            "users": 2,
-            "errors": 3,
-            "latency": 4
-        }
-    
-    def __call__(self, key_bytes, all_partitions, available_partitions):
-        if key_bytes is None:
-            if available_partitions:
-                return random.choice(available_partitions)
-            return random.choice(all_partitions)
-        
-        category = key_bytes.decode('utf-8')
-        partition = self.category_partition_map.get(category)
-        if partition is not None and partition in available_partitions:
-            return partition
-        return random.choice(available_partitions)
-
-def create_producer() -> KafkaProducer:
-    return KafkaProducer(
-        bootstrap_servers=['localhost:9092'],
-        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-        key_serializer=lambda v: v.encode('utf-8'),
-        partitioner=CustomPartitioner
-    )
-
-def ensure_topic_exists(topic_name: str, num_partitions: int):
-    try:
-        admin_client = KafkaAdminClient(bootstrap_servers=['localhost:9092'])
-        if topic_name not in admin_client.list_topics():
-            topic = NewTopic(
-                name=topic_name,
-                num_partitions=num_partitions,
-                replication_factor=1
-            )
-            admin_client.create_topics([topic])
-            print(f"Created topic {topic_name} with {num_partitions} partitions")
-        admin_client.close()
-    except Exception as e:
-        print(f"Error ensuring topic exists: {e}")
-
-def produce_messages(producer: KafkaProducer, category: str, stop_event: threading.Event):
-    message_count = 0
-    
-    while not stop_event.is_set():
-        try:
-            msg = Message(
-                id=f"msg-{category}-{message_count}",
-                category=category,
-                value=random.random() * 100
-            )
-
-            future = producer.send(
-                'analytics-topic',
-                key=category,
-                value=msg.to_dict()
+    def run(self):
+        while self.running:
+            # Generate sample analytics data
+            event_types = ['pageview', 'click', 'purchase']
+            event = {
+                'timestamp': datetime.now().isoformat(),
+                'event_type': random.choice(event_types),
+                'user_id': random.randint(1, 1000),
+                'producer_id': self.producer_id
+            }
+            
+            # Use user_id as key for consistent partition routing
+            key = str(event['user_id'])
+            
+            # Send message
+            future = self.producer.send(
+                self.topic_name,
+                key=key,
+                value=event
             )
             
-            if message_count % 100 == 0:
-                metadata = future.get(timeout=1)
-                print(f"Producer (Category: {category}): Message sent! "
-                      f"Partition: {metadata.partition}, Offset: {metadata.offset}")
+            try:
+                record_metadata = future.get(timeout=10)
+                print(f"Producer {self.producer_id} sent event to topic {record_metadata.topic} "
+                      f"partition {record_metadata.partition} offset {record_metadata.offset}")
+            except Exception as e:
+                print(f"Error sending message: {e}")
             
-            message_count += 1
-            time.sleep(0.1)  # 100ms delay between messages
-            
-        except Exception as e:
-            print(f"Error producing message: {e}")
-            
-    print(f"Producer for category {category} shutting down...")
+            time.sleep(random.uniform(0.1, 2.0))  # Random delay between messages
+
+    def stop(self):
+        self.running = False
 
 def main():
-    # Ensure topic exists with correct number of partitions
-    ensure_topic_exists('analytics-topic', 5)
-    
-    # Create producer
-    producer = create_producer()
-    
-    # Setup shutdown handling
-    stop_event = threading.Event()
-    def signal_handler(signum, frame):
-        print("\nShutdown signal received, closing producers...")
-        stop_event.set()
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Start producer threads
-    categories = ["sales", "traffic", "users", "errors", "latency"]
-    threads = []
-    
-    for category in categories:
-        thread = threading.Thread(
-            target=produce_messages,
-            args=(producer, category, stop_event)
-        )
-        thread.start()
-        threads.append(thread)
-    
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
-    
-    # Clean up
-    producer.close()
+    BOOTSTRAP_SERVERS = ['localhost:9092']
+    TOPIC_NAME = 'analytics-topic'
+    NUM_PRODUCERS = 3
+
+    # Create and start multiple producer threads
+    producers = []
+    for i in range(NUM_PRODUCERS):
+        producer = AnalyticsProducer(BOOTSTRAP_SERVERS, TOPIC_NAME, f"producer-{i}")
+        producers.append(producer)
+        producer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Shutting down producers...")
+        for producer in producers:
+            producer.stop()
+            producer.join()
 
 if __name__ == "__main__":
     main()

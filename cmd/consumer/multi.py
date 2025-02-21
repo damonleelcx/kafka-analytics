@@ -1,4 +1,4 @@
-from kafka import KafkaConsumer, TopicPartition
+from kafka import KafkaConsumer
 from threading import Thread
 import json
 
@@ -10,8 +10,7 @@ class AnalyticsConsumer(Thread):
             group_id=group_id,
             auto_offset_reset='earliest',
             enable_auto_commit=True,
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            key_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            value_deserializer=lambda x: json.loads(x.decode('utf-8'))  # Only deserialize value
         )
         self.topic_name = topic_name
         self.consumer_id = consumer_id
@@ -33,7 +32,7 @@ class AnalyticsConsumer(Thread):
                         print(f"Topic: {record.topic}")
                         print(f"Partition: {record.partition}")
                         print(f"Offset: {record.offset}")
-                        print(f"Key: {record.key}")
+                        print(f"Key: {record.key.decode('utf-8') if record.key else None}")  # Decode key if present
                         print(f"Value: {record.value}")
                         
                         # Process different event types

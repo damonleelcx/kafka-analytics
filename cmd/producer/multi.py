@@ -10,8 +10,7 @@ class AnalyticsProducer(Thread):
         Thread.__init__(self)
         self.producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            key_serializer=lambda v: json.dumps(v).encode('utf-8')
+            value_serializer=lambda x: json.dumps(x).encode('utf-8')  # Remove key serializer
         )
         self.topic_name = topic_name
         self.producer_id = producer_id
@@ -29,7 +28,7 @@ class AnalyticsProducer(Thread):
             }
             
             # Use user_id as key for consistent partition routing
-            key = str(event['user_id'])
+            key = str(event['user_id']).encode('utf-8')  # Encode key as bytes
             
             # Send message
             future = self.producer.send(

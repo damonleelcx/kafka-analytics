@@ -11,7 +11,9 @@ How to run
 .\bin\windows\kafka-topics.bat --describe --topic analytics-topic --bootstrap-server localhost:9092
 
 go run cmd/consumer/main.go
+
 go run cmd/producer/main.go
 
 python cmd/producer/multi.py
+
 python cmd/consumer/multi.py
